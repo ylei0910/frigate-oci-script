@@ -278,7 +278,7 @@ while IFS= read -r line; do
     fi
     [[ -n "$cpath" ]] || continue
     rel="${cpath#/}"
-    excludes+=( --exclude="${rel}" --exclude="${rel%/}/" )
+    excludes+=( --exclude="/${rel}" --exclude="/${rel%/}/" )
 done < <(grep -E '^mp[0-9]+:' "$LXC_CONF" || true)
 
 # Parse low-level lxc.mount.entry
@@ -288,7 +288,7 @@ while IFS= read -r line; do
     guest_path="${fields[2]}"
     [[ -n "$guest_path" ]] || continue
     rel="${guest_path#/}"
-    excludes+=( --exclude="${rel}" --exclude="${rel%/}/" )
+    excludes+=( --exclude="/${rel}" --exclude="/${rel%/}/" )
 done < <(grep -E '^lxc\.mount\.entry:' "$LXC_CONF" || true)
 
 # Sync files
