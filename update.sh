@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Frigate OCI Update Script for Proxmox VE 9.1+
+# Frigate OCI Script Updater for Proxmox VE 9.1+
 # Automates the lifecycle of updating native OCI container templates.
 
 set -eo pipefail
@@ -21,11 +21,11 @@ log_info() { echo -e "${CYAN}[INFO]${NC} $1"; }
 error_exit() { echo -e "${RED}[ERROR]${NC} $1" >&2; exit 1; }
 
 # Set terminal title
-echo -ne "\033]0;Frigate PVE OCI Updater\007"
+echo -ne "\033]0;Frigate OCI Script Updater\007"
 
 echo -e "${GREEN}"
 echo "============================================="
-echo "   Frigate PVE Native OCI LXC Updater        "
+echo "         Frigate OCI Script Updater          "
 echo "============================================="
 echo -e "${NC}"
 

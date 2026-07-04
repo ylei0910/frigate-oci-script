@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Frigate OCI Installer for Proxmox VE 9.1+
+# Frigate OCI Script for Proxmox VE 9.1+
 # Installs Frigate natively as an unprivileged OCI-based LXC container.
 
 set -eo pipefail
@@ -75,11 +75,11 @@ run_cmd() {
 }
 
 # Set terminal title
-echo -ne "\033]0;Frigate PVE OCI Installer\007"
+echo -ne "\033]0;Frigate OCI Script\007"
 
 echo -e "${GREEN}"
 echo "============================================="
-echo "   Frigate PVE Native OCI LXC Installer      "
+echo "             Frigate OCI Script              "
 echo "============================================="
 echo -e "${NC}"
 
