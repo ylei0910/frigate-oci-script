@@ -295,7 +295,14 @@ SAFE_IMG_NAME=$(echo "$FRIGATE_IMAGE" | tr '/:' '-')
 OCI_TEMPLATE_NAME="${SAFE_IMG_NAME}"
 
 # Check if template is already cached on host to bypass duplicate pull
-TEMPLATE_PATH=$(pvesm path "${TEMPLATE_STORAGE}:vztmpl/${OCI_TEMPLATE_NAME}.tar" 2>/dev/null || echo "")
+# We query the storage path using a dummy volume ID with a standard extension (.tar.gz)
+# because some Proxmox storage plugins fail to parse volume IDs ending in .tar via 'pvesm path'.
+TEMPLATE_DIR_PATH=$(pvesm path "${TEMPLATE_STORAGE}:vztmpl/dummy.tar.gz" 2>/dev/null || echo "")
+if [ -n "$TEMPLATE_DIR_PATH" ]; then
+    TEMPLATE_PATH="$(dirname "$TEMPLATE_DIR_PATH")/${OCI_TEMPLATE_NAME}.tar"
+else
+    TEMPLATE_PATH=""
+fi
 PULL_REQUIRED=true
 
 if [ -n "$TEMPLATE_PATH" ] && [ -f "$TEMPLATE_PATH" ]; then
@@ -308,6 +315,12 @@ if [ "$PULL_REQUIRED" = true ]; then
     if [ "$DRY_RUN" = true ]; then
         log_info "[DRY RUN] Would initiate pull through Proxmox OCI Registry api for $FRIGATE_IMAGE"
     else
+        # Remove any existing/incomplete file at the template path to prevent "refusing to override existing file" error
+        if [ -n "$TEMPLATE_PATH" ] && [ -f "$TEMPLATE_PATH" ]; then
+            log_warn "Removing existing/incomplete template file at $TEMPLATE_PATH to allow a fresh pull..."
+            rm -f "$TEMPLATE_PATH"
+        fi
+
         log_info "Initiating pull through Proxmox OCI Registry api..."
         UPID=$(pvesh create "/nodes/localhost/storage/${TEMPLATE_STORAGE}/oci-registry-pull" \
             --reference "$FRIGATE_IMAGE" \

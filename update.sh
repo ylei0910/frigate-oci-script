@@ -37,7 +37,7 @@ fi
 # Parse arguments
 CT_ID=""
 VERSION=""
-TEMPLATE_STORAGE="local"
+TEMPLATE_STORAGE=""
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -74,6 +74,15 @@ if [ -z "$CT_ID" ]; then
     read -p "Enter Frigate Container ID: " CT_ID
 fi
 
+if [ -z "$TEMPLATE_STORAGE" ]; then
+    TEMPLATE_STORAGES=$(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 {print $1}')
+    if echo "$TEMPLATE_STORAGES" | grep -q "^local$"; then
+        TEMPLATE_STORAGE="local"
+    else
+        TEMPLATE_STORAGE=$(echo "$TEMPLATE_STORAGES" | head -n 1)
+    fi
+fi
+
 if [ -z "$VERSION" ]; then
     read -p "Enter new Frigate Version Tag (e.g., 0.17.2, or press Enter for latest stable): " VERSION
     VERSION=${VERSION:-latest}
@@ -106,7 +115,14 @@ log_step "Pulling OCI image: $FRIGATE_IMAGE..."
 log_info "Initiating pull through Proxmox OCI Registry API..."
 
 # Check if template is already cached on host to bypass duplicate pull
-TEMPLATE_PATH=$(pvesm path "${TEMPLATE_STORAGE}:vztmpl/${OCI_TEMPLATE_NAME}.tar" 2>/dev/null || echo "")
+# We query the storage path using a dummy volume ID with a standard extension (.tar.gz)
+# because some Proxmox storage plugins fail to parse volume IDs ending in .tar via 'pvesm path'.
+TEMPLATE_DIR_PATH=$(pvesm path "${TEMPLATE_STORAGE}:vztmpl/dummy.tar.gz" 2>/dev/null || echo "")
+if [ -n "$TEMPLATE_DIR_PATH" ]; then
+    TEMPLATE_PATH="$(dirname "$TEMPLATE_DIR_PATH")/${OCI_TEMPLATE_NAME}.tar"
+else
+    TEMPLATE_PATH=""
+fi
 PULL_REQUIRED=true
 
 if [ -n "$TEMPLATE_PATH" ] && [ -f "$TEMPLATE_PATH" ]; then
@@ -119,6 +135,12 @@ if [ "$PULL_REQUIRED" = true ]; then
     if [ "$DRY_RUN" = true ]; then
         log_info "[DRY RUN] Would pull OCI image $FRIGATE_IMAGE and cache as ${TEMPLATE_STORAGE}:vztmpl/${OCI_TEMPLATE_NAME}.tar"
     else
+        # Remove any existing/incomplete file at the template path to prevent "refusing to override existing file" error
+        if [ -n "$TEMPLATE_PATH" ] && [ -f "$TEMPLATE_PATH" ]; then
+            log_warn "Removing existing/incomplete template file at $TEMPLATE_PATH to allow a fresh pull..."
+            rm -f "$TEMPLATE_PATH"
+        fi
+
         UPID=$(pvesh create "/nodes/localhost/storage/${TEMPLATE_STORAGE}/oci-registry-pull" \
             --reference "$FRIGATE_IMAGE" \
             --filename "$OCI_TEMPLATE_NAME" \
