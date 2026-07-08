@@ -524,32 +524,49 @@ if [ "$DRY_RUN" = true ]; then
 else
     pct start "$CT_ID" || log_warn "Failed to start container automatically for s6 setup."
 
-    # Wait for container to be fully running
-    sleep 2
+    # Poll until the container is actually reachable via pct exec instead of a flat sleep
+    S6_READY=false
+    for i in {1..50}; do
+        if pct exec "$CT_ID" -- true &>/dev/null; then
+            S6_READY=true
+            break
+        fi
+        sleep 0.1
+    done
 
-    # Create s6-overlay directory structure
-    pct exec "$CT_ID" -- mkdir -p /etc/s6-overlay/s6-rc.d/disable-ipv6/dependencies.d || log_warn "Failed to create s6 directories"
+    if [ "$S6_READY" = true ]; then
+        S6_OK=true
+        # Create s6-overlay directory structure
+        pct exec "$CT_ID" -- mkdir -p /etc/s6-overlay/s6-rc.d/disable-ipv6/dependencies.d || { log_warn "Failed to create s6 directories"; S6_OK=false; }
 
-    # Create service type file
-    pct exec "$CT_ID" -- bash -c "echo oneshot > /etc/s6-overlay/s6-rc.d/disable-ipv6/type" || log_warn "Failed to create s6 type file"
+        # Create service type file
+        pct exec "$CT_ID" -- bash -c "echo oneshot > /etc/s6-overlay/s6-rc.d/disable-ipv6/type" || { log_warn "Failed to create s6 type file"; S6_OK=false; }
 
-    # Create run script on host and push to container
-    cat > /tmp/disable-ipv6-run << 'RUNSCRIPT_EOF'
+        # Create run script on host and push to container
+        cat > /tmp/disable-ipv6-run << 'RUNSCRIPT_EOF'
 #!/command/with-contenv bash
 set -e
 sysctl -w net.ipv6.conf.all.disable_ipv6=1
 RUNSCRIPT_EOF
-    chmod +x /tmp/disable-ipv6-run
-    pct push "$CT_ID" /tmp/disable-ipv6-run /etc/s6-overlay/s6-rc.d/disable-ipv6/run || log_warn "Failed to push run script"
-    rm -f /tmp/disable-ipv6-run
+        chmod +x /tmp/disable-ipv6-run
+        pct push "$CT_ID" /tmp/disable-ipv6-run /etc/s6-overlay/s6-rc.d/disable-ipv6/run || { log_warn "Failed to push run script"; S6_OK=false; }
+        rm -f /tmp/disable-ipv6-run
 
-    # Create up file (points to run script)
-    pct exec "$CT_ID" -- bash -c "echo /etc/s6-overlay/s6-rc.d/disable-ipv6/run > /etc/s6-overlay/s6-rc.d/disable-ipv6/up" || log_warn "Failed to create up file"
+        # Create up file (points to run script)
+        pct exec "$CT_ID" -- bash -c "echo /etc/s6-overlay/s6-rc.d/disable-ipv6/run > /etc/s6-overlay/s6-rc.d/disable-ipv6/up" || { log_warn "Failed to create up file"; S6_OK=false; }
 
-    # Make go2rtc depend on disable-ipv6 service
-    pct exec "$CT_ID" -- touch /etc/s6-overlay/s6-rc.d/go2rtc/dependencies.d/disable-ipv6 || log_warn "Failed to add go2rtc dependency"
+        # Make go2rtc depend on disable-ipv6 service
+        pct exec "$CT_ID" -- touch /etc/s6-overlay/s6-rc.d/go2rtc/dependencies.d/disable-ipv6 || { log_warn "Failed to add go2rtc dependency"; S6_OK=false; }
 
-    log_success "s6 oneshot service configured - IPv6 will be disabled before go2rtc starts"
+        # Verify the run script actually landed before declaring success
+        if [ "$S6_OK" = true ] && pct exec "$CT_ID" -- test -x /etc/s6-overlay/s6-rc.d/disable-ipv6/run &>/dev/null; then
+            log_success "s6 oneshot service configured - IPv6 will be disabled before go2rtc starts"
+        else
+            log_warn "s6 oneshot service setup could not be fully verified - check container $CT_ID manually"
+        fi
+    else
+        log_warn "Container $CT_ID did not become ready in time. Skipping s6 service setup - you will need to configure it manually."
+    fi
 fi
 
 

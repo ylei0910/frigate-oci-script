@@ -332,56 +332,70 @@ else
     pct destroy "$TEMP_ID" || log_warn "Failed to destroy temporary container."
 fi
 
-# Start updated container
-if [ "$WAS_RUNNING" = true ]; then
-    log_step "Starting updated container $CT_ID..."
-    if [ "$DRY_RUN" = true ]; then
-        log_info "[DRY RUN] Would start container $CT_ID"
-    else
-        pct start "$CT_ID" || log_warn "Failed to start container automatically. Try running 'pct start $CT_ID' manually."
-    fi
-fi
-
 # Recreate s6 IPv6 Disable Service (survives cluster migration)
+# Requires the container to be running for pct exec/push; start it
+# temporarily if it wasn't running so the write always succeeds, then
+# restore the original stopped/running state afterwards.
 log_step "Recreating s6 oneshot service to disable IPv6 before go2rtc starts..."
 if [ "$DRY_RUN" = true ]; then
     log_info "[DRY RUN] Would recreate s6 oneshot service disable-ipv6 in container $CT_ID"
 else
-    # Wait for container to be fully running
-    sleep 2
+    STARTED_FOR_S6=false
+    if ! pct status "$CT_ID" | grep -q "running"; then
+        log_info "Starting container $CT_ID temporarily to write s6 service..."
+        if pct start "$CT_ID"; then
+            STARTED_FOR_S6=true
+        else
+            log_warn "Failed to start container $CT_ID for s6 setup. Skipping s6 service recreation."
+        fi
+    fi
 
-    # Create s6-overlay directory structure
-    pct exec "$CT_ID" -- mkdir -p /etc/s6-overlay/s6-rc.d/disable-ipv6/dependencies.d || log_warn "Failed to create s6 directories"
+    if pct status "$CT_ID" | grep -q "running"; then
+        # Poll until pct exec succeeds instead of a flat sleep
+        S6_READY=false
+        for i in {1..50}; do
+            if pct exec "$CT_ID" -- true &>/dev/null; then
+                S6_READY=true
+                break
+            fi
+            sleep 0.1
+        done
 
-    # Create service type file
-    pct exec "$CT_ID" -- bash -c "echo oneshot > /etc/s6-overlay/s6-rc.d/disable-ipv6/type" || log_warn "Failed to create s6 type file"
+        if [ "$S6_READY" = true ]; then
+            S6_OK=true
+            pct exec "$CT_ID" -- mkdir -p /etc/s6-overlay/s6-rc.d/disable-ipv6/dependencies.d || { log_warn "Failed to create s6 directories"; S6_OK=false; }
+            pct exec "$CT_ID" -- bash -c "echo oneshot > /etc/s6-overlay/s6-rc.d/disable-ipv6/type" || { log_warn "Failed to create s6 type file"; S6_OK=false; }
 
-    # Create run script on host and push to container
-    cat > /tmp/disable-ipv6-run << 'RUNSCRIPT_EOF'
+            cat > /tmp/disable-ipv6-run << 'RUNSCRIPT_EOF'
 #!/command/with-contenv bash
 set -e
 sysctl -w net.ipv6.conf.all.disable_ipv6=1
 RUNSCRIPT_EOF
-    chmod +x /tmp/disable-ipv6-run
-    pct push "$CT_ID" /tmp/disable-ipv6-run /etc/s6-overlay/s6-rc.d/disable-ipv6/run || log_warn "Failed to push run script"
-    rm -f /tmp/disable-ipv6-run
+            chmod +x /tmp/disable-ipv6-run
+            pct push "$CT_ID" /tmp/disable-ipv6-run /etc/s6-overlay/s6-rc.d/disable-ipv6/run || { log_warn "Failed to push run script"; S6_OK=false; }
+            rm -f /tmp/disable-ipv6-run
 
-    # Create up file (points to run script)
-    pct exec "$CT_ID" -- bash -c "echo /etc/s6-overlay/s6-rc.d/disable-ipv6/run > /etc/s6-overlay/s6-rc.d/disable-ipv6/up" || log_warn "Failed to create up file"
+            pct exec "$CT_ID" -- bash -c "echo /etc/s6-overlay/s6-rc.d/disable-ipv6/run > /etc/s6-overlay/s6-rc.d/disable-ipv6/up" || { log_warn "Failed to create up file"; S6_OK=false; }
+            pct exec "$CT_ID" -- touch /etc/s6-overlay/s6-rc.d/go2rtc/dependencies.d/disable-ipv6 || { log_warn "Failed to add go2rtc dependency"; S6_OK=false; }
 
-    # Make go2rtc depend on disable-ipv6 service
-    pct exec "$CT_ID" -- touch /etc/s6-overlay/s6-rc.d/go2rtc/dependencies.d/disable-ipv6 || log_warn "Failed to add go2rtc dependency"
+            # Verify the run script actually landed before declaring success
+            if [ "$S6_OK" = true ] && pct exec "$CT_ID" -- test -x /etc/s6-overlay/s6-rc.d/disable-ipv6/run &>/dev/null; then
+                log_success "s6 oneshot service recreated - IPv6 will be disabled before go2rtc starts"
+            else
+                log_warn "s6 oneshot service recreation could not be fully verified - check container $CT_ID manually"
+            fi
+        else
+            log_warn "Container $CT_ID did not become ready in time. Skipping s6 service recreation."
+        fi
+    fi
 
-    log_success "s6 oneshot service recreated - IPv6 will be disabled before go2rtc starts"
-fi
-
-# Restart container to apply s6 service
-if [ "$WAS_RUNNING" = true ]; then
-    log_step "Restarting updated container $CT_ID to apply s6 service..."
-    if [ "$DRY_RUN" = true ]; then
-        log_info "[DRY RUN] Would restart container $CT_ID"
-    else
+    # Restore original running state
+    if [ "$WAS_RUNNING" = true ]; then
+        log_step "Restarting updated container $CT_ID to apply s6 service..."
         pct reboot "$CT_ID" || log_warn "Failed to restart container. Try running 'pct reboot $CT_ID' manually."
+    elif [ "$STARTED_FOR_S6" = true ]; then
+        log_step "Stopping container $CT_ID to restore its original (stopped) state..."
+        pct stop "$CT_ID" || log_warn "Failed to stop container $CT_ID. It was started only to write the s6 service."
     fi
 fi
 
