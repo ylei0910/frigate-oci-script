@@ -514,66 +514,51 @@ EOF
         fi
     fi
 
-    # Create and register network hookscript to solve IPv6 and loopback issues on unprivileged OCI
-    log_step "Creating background network hookscript..."
-    SNIPPETS_DIR="/var/lib/vz/snippets"
-    mkdir -p "$SNIPPETS_DIR"
-    HOOKSCRIPT_PATH="${SNIPPETS_DIR}/ct${CT_ID}-network.sh"
-
-    if [ "$NET_IP" = "dhcp" ]; then
-        NET_CMD="nsenter -t \"\\\$CT_PID\" -n dhclient eth0 2>/dev/null || nsenter -t \"\\\$CT_PID\" -n udhcpc -i eth0 2>/dev/null"
-    else
-        NET_CMD="nsenter -t \"\\\$CT_PID\" -n ip addr add $NET_IP dev eth0 2>/dev/null
-        nsenter -t \"\\\$CT_PID\" -n ip route add default via $NET_GW 2>/dev/null"
-    fi
-
-    cat > "$HOOKSCRIPT_PATH" << EOF
-#!/bin/bash
-# Proxmox hookscript: configure network and flush IPv6 for CT \${CT_ID}
-
-VMID="\\\$1"
-PHASE="\\\$2"
-
-if [ "\\\$VMID" != "$CT_ID" ] || [ "\\\$PHASE" != "post-start" ]; then
-    exit 0
-fi
-
-# Run in background via setsid to release PVE startup task immediately
-setsid bash -c '
-    for i in {1..50}; do
-        CT_PID=\\\$(lxc-info -n $CT_ID -p -H 2>/dev/null)
-        if [ -n "\\\$CT_PID" ]; then
-            break
-        fi
-        sleep 0.05
-    done
-    if [ -n "\\\$CT_PID" ]; then
-        echo \"ct\${CT_ID}-network: configuring network inside PID \\\$CT_PID...\"
-        nsenter -t \"\\\$CT_PID\" -n sysctl -w net.ipv6.conf.all.disable_ipv6=1
-        nsenter -t \"\\\$CT_PID\" -n sysctl -w net.ipv6.conf.default.disable_ipv6=1
-        nsenter -t \"\\\$CT_PID\" -n sysctl -w net.ipv6.conf.eth0.disable_ipv6=1
-        nsenter -t \"\\\$CT_PID\" -n ip link set lo up
-        nsenter -t \"\\\$CT_PID\" -n ip link set eth0 up
-        $NET_CMD
-        echo \"ct\${CT_ID}-network: network configured successfully\"
-    fi
-' > /var/log/ct\${CT_ID}-network.log 2>&1 &
-
-exit 0
-EOF
-
-    chmod +x "$HOOKSCRIPT_PATH"
-    echo "hookscript: local:snippets/ct${CT_ID}-network.sh" >> "$LXC_CONF"
-    log_success "Hookscript configured and registered in $LXC_CONF"
 fi
 
 
-# 8. Start Container
-log_step "Starting Frigate container $CT_ID..."
+# 7.5 Setup s6 IPv6 Disable Service (survives cluster migration)
+log_step "Setting up s6 oneshot service to disable IPv6 before go2rtc starts..."
 if [ "$DRY_RUN" = true ]; then
-    log_info "[DRY RUN] Would start container $CT_ID"
+    log_info "[DRY RUN] Would create s6 oneshot service disable-ipv6 in container $CT_ID"
 else
-    pct start "$CT_ID" || log_warn "Failed to start container automatically. Try running 'pct start $CT_ID' manually."
+    pct start "$CT_ID" || log_warn "Failed to start container automatically for s6 setup."
+
+    # Wait for container to be fully running
+    sleep 2
+
+    # Create s6-overlay directory structure
+    pct exec "$CT_ID" -- mkdir -p /etc/s6-overlay/s6-rc.d/disable-ipv6/dependencies.d || log_warn "Failed to create s6 directories"
+
+    # Create service type file
+    pct exec "$CT_ID" -- bash -c "echo oneshot > /etc/s6-overlay/s6-rc.d/disable-ipv6/type" || log_warn "Failed to create s6 type file"
+
+    # Create run script on host and push to container
+    cat > /tmp/disable-ipv6-run << 'RUNSCRIPT_EOF'
+#!/command/with-contenv bash
+set -e
+sysctl -w net.ipv6.conf.all.disable_ipv6=1
+RUNSCRIPT_EOF
+    chmod +x /tmp/disable-ipv6-run
+    pct push "$CT_ID" /tmp/disable-ipv6-run /etc/s6-overlay/s6-rc.d/disable-ipv6/run || log_warn "Failed to push run script"
+    rm -f /tmp/disable-ipv6-run
+
+    # Create up file (points to run script)
+    pct exec "$CT_ID" -- bash -c "echo /etc/s6-overlay/s6-rc.d/disable-ipv6/run > /etc/s6-overlay/s6-rc.d/disable-ipv6/up" || log_warn "Failed to create up file"
+
+    # Make go2rtc depend on disable-ipv6 service
+    pct exec "$CT_ID" -- touch /etc/s6-overlay/s6-rc.d/go2rtc/dependencies.d/disable-ipv6 || log_warn "Failed to add go2rtc dependency"
+
+    log_success "s6 oneshot service configured - IPv6 will be disabled before go2rtc starts"
+fi
+
+
+# 8. Start Container (restart to apply s6 service)
+log_step "Restarting Frigate container $CT_ID to apply s6 service..."
+if [ "$DRY_RUN" = true ]; then
+    log_info "[DRY RUN] Would restart container $CT_ID"
+else
+    pct reboot "$CT_ID" || log_warn "Failed to restart container. Try running 'pct reboot $CT_ID' manually."
 fi
 
 # 9. Create Proxmox summary dashboard notes

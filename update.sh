@@ -342,6 +342,49 @@ if [ "$WAS_RUNNING" = true ]; then
     fi
 fi
 
+# Recreate s6 IPv6 Disable Service (survives cluster migration)
+log_step "Recreating s6 oneshot service to disable IPv6 before go2rtc starts..."
+if [ "$DRY_RUN" = true ]; then
+    log_info "[DRY RUN] Would recreate s6 oneshot service disable-ipv6 in container $CT_ID"
+else
+    # Wait for container to be fully running
+    sleep 2
+
+    # Create s6-overlay directory structure
+    pct exec "$CT_ID" -- mkdir -p /etc/s6-overlay/s6-rc.d/disable-ipv6/dependencies.d || log_warn "Failed to create s6 directories"
+
+    # Create service type file
+    pct exec "$CT_ID" -- bash -c "echo oneshot > /etc/s6-overlay/s6-rc.d/disable-ipv6/type" || log_warn "Failed to create s6 type file"
+
+    # Create run script on host and push to container
+    cat > /tmp/disable-ipv6-run << 'RUNSCRIPT_EOF'
+#!/command/with-contenv bash
+set -e
+sysctl -w net.ipv6.conf.all.disable_ipv6=1
+RUNSCRIPT_EOF
+    chmod +x /tmp/disable-ipv6-run
+    pct push "$CT_ID" /tmp/disable-ipv6-run /etc/s6-overlay/s6-rc.d/disable-ipv6/run || log_warn "Failed to push run script"
+    rm -f /tmp/disable-ipv6-run
+
+    # Create up file (points to run script)
+    pct exec "$CT_ID" -- bash -c "echo /etc/s6-overlay/s6-rc.d/disable-ipv6/run > /etc/s6-overlay/s6-rc.d/disable-ipv6/up" || log_warn "Failed to create up file"
+
+    # Make go2rtc depend on disable-ipv6 service
+    pct exec "$CT_ID" -- touch /etc/s6-overlay/s6-rc.d/go2rtc/dependencies.d/disable-ipv6 || log_warn "Failed to add go2rtc dependency"
+
+    log_success "s6 oneshot service recreated - IPv6 will be disabled before go2rtc starts"
+fi
+
+# Restart container to apply s6 service
+if [ "$WAS_RUNNING" = true ]; then
+    log_step "Restarting updated container $CT_ID to apply s6 service..."
+    if [ "$DRY_RUN" = true ]; then
+        log_info "[DRY RUN] Would restart container $CT_ID"
+    else
+        pct reboot "$CT_ID" || log_warn "Failed to restart container. Try running 'pct reboot $CT_ID' manually."
+    fi
+fi
+
 # Update Proxmox summary dashboard notes
 log_step "Updating Proxmox summary dashboard..."
 IP_ADDRESS=""
