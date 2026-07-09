@@ -37,13 +37,13 @@ This script eliminates the resource overhead and nesting requirements of running
 To install Frigate, execute the following command on your Proxmox host shell:
 
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/saihgupr/frigate-oci-script/main/install.sh)
+bash <(curl -s https://raw.githubusercontent.com/ylei0910/frigate-oci-script/main/install.sh)
 ```
 
 Alternatively, download and run the script manually:
 
 ```bash
-wget https://raw.githubusercontent.com/saihgupr/frigate-oci-script/main/install.sh
+wget https://raw.githubusercontent.com/ylei0910/frigate-oci-script/main/install.sh
 bash install.sh
 ```
 
@@ -71,13 +71,13 @@ When running the installer manually, you can pass parameters to customize or aut
 To update Frigate, run:
 
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/saihgupr/frigate-oci-script/main/update.sh) -i <CTID> -v <version>
+bash <(curl -s https://raw.githubusercontent.com/ylei0910/frigate-oci-script/main/update.sh) -i <CTID> -v <version>
 ```
 
 Alternatively, download and run the script manually:
 
 ```bash
-wget https://raw.githubusercontent.com/saihgupr/frigate-oci-script/main/update.sh
+wget https://raw.githubusercontent.com/ylei0910/frigate-oci-script/main/update.sh
 bash update.sh -i <CTID> -v <version>
 ```
 
@@ -146,7 +146,7 @@ go2rtc:
 
 ## Support & Feedback
 
-If you encounter any issues or have feature requests, please open an [issue on GitHub](https://github.com/saihgupr/frigate-oci-script/issues).
+If you encounter any issues or have feature requests, please open an [issue on GitHub](https://github.com/ylei0910/frigate-oci-script/issues).
 
 If you find it useful, consider giving it a star ⭐ or [making a donation](https://ko-fi.com/saihgupr) to support development.
 

@@ -623,7 +623,7 @@ ${CORAL_LINE}- Resources: ${CT_RAM}MB RAM / ${CT_CORES} CPU Cores
 - Media Storage: ${HOST_MEDIA_PATH}
 ${MOUNT_LINE}
 ---
-GitHub: [saihgupr/frigate-oci-script](https://github.com/saihgupr/frigate-oci-script)
+GitHub: [ylei0910/frigate-oci-script](https://github.com/ylei0910/frigate-oci-script)
 
 Support: [Buy me a coffee](https://ko-fi.com/saihgupr)")
 
