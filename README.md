@@ -16,7 +16,7 @@ This script eliminates the resource overhead and nesting requirements of running
 * **Unprivileged by Default**: Stronger isolation and security compared to privileged Docker-in-LXC stacks.
 * **Hardware Acceleration**: Automatic configuration of Intel iGPU, AMD, or Nvidia GPUs using Proxmox 8.2+ `dev[n]` mappings.
 * **Google Coral Support**: Seamless passthrough for both PCIe Coral (Apex) and USB Coral TPUs.
-* **WebRTC & Network Hookscript**: Automatically provisions a background `post-start` network hookscript to configure the loopback interface, static routes, and flush IPv6 addresses inside the container namespace, enabling flawless out-of-the-box `go2rtc` WebRTC streaming.
+* **WebRTC Fix via In-Container s6 Service**: Automatically provisions an `s6-overlay` oneshot service inside the container that disables IPv6 and brings up the loopback interface before `go2rtc` starts, avoiding the IPv6 Duplicate Address Detection race that breaks WebRTC live view on boot. Because the fix lives inside the container filesystem (not a host-side Proxmox hookscript), it survives cluster node-to-node migrations.
 * **State Persistence**: Mounts host directories for configuration and media files, ensuring no data loss when container is recreated.
 * **Seamless Upgrades**: An intelligent `update.sh` script that automates container teardown, pulls the new OCI template, and recreates the container while restoring all environment variables, resources, and hardware passthrough configurations.
 

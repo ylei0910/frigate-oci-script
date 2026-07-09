@@ -370,6 +370,7 @@ else
 #!/command/with-contenv bash
 set -e
 sysctl -w net.ipv6.conf.all.disable_ipv6=1
+ip link set lo up
 RUNSCRIPT_EOF
             chmod +x /tmp/disable-ipv6-run
             pct push "$CT_ID" /tmp/disable-ipv6-run /etc/s6-overlay/s6-rc.d/disable-ipv6/run || { log_warn "Failed to push run script"; S6_OK=false; }
