@@ -468,18 +468,57 @@ else
         echo "# Frigate Hardware Acceleration" >> "$LXC_CONF"
         
         if [[ "$GPU_TYPE" =~ ^(intel|amd|vaapi)$ ]]; then
+            # /dev/dri/cardN numbering is not guaranteed to match across nodes in an
+            # HA cluster with mixed hardware, which breaks passthrough on migration
+            # since the raw path gets hardcoded into the LXC config. On a cluster
+            # node, bootstrap a stable udev symlink (/dev/dri/card_lxc) and map the
+            # card device through that instead of its raw path. renderD* device
+            # numbering is stable, so it's still mapped directly.
+            STABLE_CARD_SYMLINK="/dev/dri/card_lxc"
+            if [ -f /etc/pve/corosync.conf ] && [ ! -e "$STABLE_CARD_SYMLINK" ]; then
+                log_step "Cluster node detected - provisioning stable GPU symlink for HA migration safety..."
+                UDEV_RULE_PATH="/etc/udev/rules.d/99-dri-stable.rules"
+                if [ ! -f "$UDEV_RULE_PATH" ]; then
+                    echo 'SUBSYSTEM=="drm", KERNEL=="card[0-9]*", DRIVERS=="?*", SYMLINK+="dri/card_lxc"' > "$UDEV_RULE_PATH"
+                    udevadm control --reload-rules && udevadm trigger
+                    sleep 2
+                fi
+                if [ -e "$STABLE_CARD_SYMLINK" ]; then
+                    log_success "Created $STABLE_CARD_SYMLINK on this node."
+                    log_warn "For HA migration to keep working, create the same udev rule on EVERY other node in the cluster:"
+                    log_warn "  echo 'SUBSYSTEM==\"drm\", KERNEL==\"card[0-9]*\", DRIVERS==\"?*\", SYMLINK+=\"dri/card_lxc\"' > $UDEV_RULE_PATH"
+                    log_warn "  udevadm control --reload-rules && udevadm trigger"
+                else
+                    log_warn "Failed to create stable GPU symlink. Falling back to raw device paths - HA migration may break if card device numbering differs between nodes."
+                fi
+            fi
+            # Resolve which real device the stable symlink points to, so only that
+            # device gets remapped through it (leaves any other card devices, e.g.
+            # on multi-GPU hosts, mapped by their raw path as before).
+            STABLE_CARD_TARGET=""
+            [ -e "$STABLE_CARD_SYMLINK" ] && STABLE_CARD_TARGET=$(readlink -f "$STABLE_CARD_SYMLINK" 2>/dev/null || echo "")
+
             # Map all DRI devices under /dev/dri/ to support QSV surface allocation
             dev_slot=0
             for dev in /dev/dri/*; do
                 if [ -c "$dev" ]; then
+                    [ "$dev" = "$STABLE_CARD_SYMLINK" ] && continue
+                    map_dev="$dev"
+                    if [ -n "$STABLE_CARD_TARGET" ] && [ "$dev" = "$STABLE_CARD_TARGET" ]; then
+                        map_dev="$STABLE_CARD_SYMLINK"
+                    fi
                     dev_gid=$(stat -c '%g' "$dev" 2>/dev/null || echo "0")
-                    echo "dev${dev_slot}: $dev,gid=$dev_gid,mode=0666" >> "$LXC_CONF"
-                    log_success "Mapped $dev (GID $dev_gid) to dev${dev_slot}"
+                    echo "dev${dev_slot}: $map_dev,gid=$dev_gid,mode=0666" >> "$LXC_CONF"
+                    if [ "$map_dev" != "$dev" ]; then
+                        log_success "Mapped $dev (GID $dev_gid) to dev${dev_slot} via stable symlink $map_dev"
+                    else
+                        log_success "Mapped $dev (GID $dev_gid) to dev${dev_slot}"
+                    fi
                     dev_slot=$((dev_slot + 1))
                 fi
             done
             echo "lxc.apparmor.profile: unconfined" >> "$LXC_CONF"
-            
+
         elif [ "$GPU_TYPE" = "nvidia" ]; then
             echo "lxc.apparmor.profile: unconfined" >> "$LXC_CONF"
             nvidia_devs=("/dev/nvidia0" "/dev/nvidiactl" "/dev/nvidia-modeset" "/dev/nvidia-uvm" "/dev/nvidia-uvm-tools")

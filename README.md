@@ -14,7 +14,7 @@ This script eliminates the resource overhead and nesting requirements of running
 
 * **Zero Docker Overhead**: Boots the Frigate OCI image natively as a lightweight unprivileged LXC container.
 * **Unprivileged by Default**: Stronger isolation and security compared to privileged Docker-in-LXC stacks.
-* **Hardware Acceleration**: Automatic configuration of Intel iGPU, AMD, or Nvidia GPUs using Proxmox 8.2+ `dev[n]` mappings.
+* **Hardware Acceleration**: Automatic configuration of Intel iGPU, AMD, or Nvidia GPUs using Proxmox 8.2+ `dev[n]` mappings. On a cluster node (detected via `/etc/pve/corosync.conf`), Intel/AMD/VAAPI passthrough is mapped through a stable `/dev/dri/card_lxc` udev symlink rather than the raw `/dev/dri/cardN` path, since `cardN` numbering can differ between nodes with mixed GPU hardware and silently break passthrough after an HA migration. The installer provisions the udev rule on the current node and prints the rule to copy to the other nodes in the cluster.
 * **Google Coral Support**: Seamless passthrough for both PCIe Coral (Apex) and USB Coral TPUs.
 * **WebRTC Fix via In-Container s6 Service**: Automatically provisions an `s6-overlay` oneshot service inside the container that disables IPv6 and brings up the loopback interface before `go2rtc` starts, avoiding the IPv6 Duplicate Address Detection race that breaks WebRTC live view on boot. Because the fix lives inside the container filesystem (not a host-side Proxmox hookscript), it survives cluster node-to-node migrations.
 * **State Persistence**: Mounts host directories for configuration and media files, ensuring no data loss when container is recreated.
