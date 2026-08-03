@@ -266,6 +266,10 @@ M_NEW="/var/lib/lxc/${TEMP_ID}/rootfs"
 
 # Parse mount configs for excludes
 excludes=()
+# /config lives inside the container's own rootfs (not host-mounted), so it must
+# always be protected from the template resync below or the user's config.yml/db
+# would get wiped out by --delete on every update.
+excludes+=( --exclude="/config" --exclude="/config/" )
 # Parse standard Proxmox mount points (mpN)
 while IFS= read -r line; do
     [[ "$line" =~ ^mp[0-9]+: ]] || continue
@@ -431,12 +435,27 @@ elif grep -q "usb" "$LXC_CONF"; then
 fi
 
 # Detect bind mounts
+# /config normally lives inside the container's own rootfs (no host mount); fall
+# back to the legacy lxc.mount.entry layout for containers installed before that change.
 CONFIG_VAL=$(grep "lxc.mount.entry" "$LXC_CONF" | grep -i "config " || echo "")
-MEDIA_VAL=$(grep "lxc.mount.entry" "$LXC_CONF" | grep -i "media/frigate " || echo "")
-CUSTOM_VAL=$(grep "lxc.mount.entry" "$LXC_CONF" | grep -vE "config |media/frigate |/dev/bus/usb" || echo "")
+CUSTOM_VAL=$(grep "lxc.mount.entry" "$LXC_CONF" | grep -vE "config |/dev/bus/usb" || echo "")
 
-HOST_CONFIG_PATH=$(echo "$CONFIG_VAL" | awk '{print $2}' || echo "/opt/frigate/config")
-HOST_MEDIA_PATH=$(echo "$MEDIA_VAL" | awk '{print $2}' || echo "/opt/frigate/media")
+if [ -n "$CONFIG_VAL" ]; then
+    CONFIG_LOCATION="$(echo "$CONFIG_VAL" | awk '{print $2}')/config.yml"
+else
+    CONFIG_LOCATION="/config/config.yml (inside container)"
+fi
+
+# Media is a native mp0 mount point (mp0: <host_path>,mp=/media,...);
+# fall back to the legacy lxc.mount.entry layout for containers installed before that change.
+MEDIA_MP_LINE=$(grep -E '^mp[0-9]+:' "$LXC_CONF" | grep -Ei 'mp=/media(,|$)' || echo "")
+if [ -n "$MEDIA_MP_LINE" ]; then
+    HOST_MEDIA_PATH=$(echo "$MEDIA_MP_LINE" | sed -E 's/^mp[0-9]+: *//' | cut -d, -f1)
+else
+    MEDIA_VAL=$(grep "lxc.mount.entry" "$LXC_CONF" | grep -i "media/frigate " || echo "")
+    HOST_MEDIA_PATH=$(echo "$MEDIA_VAL" | awk '{print $2}')
+fi
+HOST_MEDIA_PATH=${HOST_MEDIA_PATH:-/mnt/nas/CCTV/media}
 
 MOUNT_LINE=""
 if [ -n "$CUSTOM_VAL" ]; then
@@ -459,7 +478,7 @@ DESCRIPTION=$(echo -e "# Frigate OCI Script
 ${CORAL_LINE}- Resources: ${CT_RAM}MB RAM / ${CT_CORES} CPU Cores
 
 **File Locations**
-- Configuration: ${HOST_CONFIG_PATH}/config.yml
+- Configuration: ${CONFIG_LOCATION}
 - Media Storage: ${HOST_MEDIA_PATH}
 ${MOUNT_LINE}
 ---

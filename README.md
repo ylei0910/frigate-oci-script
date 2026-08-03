@@ -17,7 +17,7 @@ This script eliminates the resource overhead and nesting requirements of running
 * **Hardware Acceleration**: Automatic configuration of Intel iGPU, AMD, or Nvidia GPUs using Proxmox 8.2+ `dev[n]` mappings. On a cluster node (detected via `/etc/pve/corosync.conf`), Intel/AMD/VAAPI passthrough is mapped through a stable `/dev/dri/card_lxc` udev symlink rather than the raw `/dev/dri/cardN` path, since `cardN` numbering can differ between nodes with mixed GPU hardware and silently break passthrough after an HA migration. The installer provisions the udev rule on the current node and prints the rule to copy to the other nodes in the cluster.
 * **Google Coral Support**: Seamless passthrough for both PCIe Coral (Apex) and USB Coral TPUs.
 * **WebRTC Fix via In-Container s6 Service**: Automatically provisions an `s6-overlay` oneshot service inside the container that disables IPv6 and brings up the loopback interface before `go2rtc` starts, avoiding the IPv6 Duplicate Address Detection race that breaks WebRTC live view on boot. Because the fix lives inside the container filesystem (not a host-side Proxmox hookscript), it survives cluster node-to-node migrations.
-* **State Persistence**: Mounts host directories for configuration and media files, ensuring no data loss when container is recreated.
+* **State Persistence**: Mounts a host directory for media files (survives container recreation); `/config` lives inside the container's own rootfs and is preserved across updates.
 * **Seamless Upgrades**: An intelligent `update.sh` script that automates container teardown, pulls the new OCI template, and recreates the container while restoring all environment variables, resources, and hardware passthrough configurations.
 
 ---
@@ -55,7 +55,7 @@ When running the installer manually, you can pass parameters to customize or aut
 | :--- | :--- | :--- |
 | `-y`, `--yes`, `--silent`, `--non-interactive` | Run in non-interactive mode (auto-applies defaults) | `bash install.sh -y` |
 | `-d`, `--dry-run` | Run in dry-run mode (simulates changes without executing them) | `bash install.sh -d` |
-| `--id <CTID>` | Specify the target Container ID (100–999) | `bash install.sh --id 999` |
+| `--id <CTID>` | Specify the target Container ID (100–999999999) | `bash install.sh --id 999` |
 | `--hostname <name>` | Specify the container hostname | `bash install.sh --hostname frigate` |
 | `--mount <host>:<guest>` | Configure a custom external storage bind mount | `bash install.sh --mount /mnt/data:/opt/storage` |
 
@@ -63,7 +63,7 @@ When running the installer manually, you can pass parameters to customize or aut
 1. Prompts for container ID, hostname, CPU/RAM, and target storage.
 2. Invokes the Proxmox API (`oci-registry-pull`) to download and cache the OCI image.
 3. Automatically sets up the container configuration with `--ostype unmanaged`.
-4. Creates host storage directories and configures bind mounts (`/config` and `/media/frigate`).
+4. Leaves `/config` inside the container's own rootfs, and configures `/media` as a native Proxmox `mp0` mount point (`replicate=0,shared=1`, default host path `/mnt/nas/CCTV/media`) — the media host path must already exist; the installer does not create it.
 5. Automates hardware and TPU passthroughs in `/etc/pve/lxc/<CTID>.conf`.
 
 ### 2. Updating Frigate
@@ -113,7 +113,14 @@ pct enter <CTID>
 This drops you directly into a bash session inside the container.
 
 ### Config File
-The Frigate configuration file is located on the Proxmox host at `/opt/frigate/config/config.yml` (or your chosen host bind-mount path). You can edit this file on the host using `nano` or upload your configuration directly. Once edited, restart the container via:
+The Frigate configuration file lives inside the container's own filesystem at `/config/config.yml` (it is not host-mounted). Edit it from the Proxmox host with:
+
+```bash
+pct enter <CTID>
+nano /config/config.yml
+```
+
+Once edited, restart the container via:
 
 ```bash
 pct restart <CTID>
