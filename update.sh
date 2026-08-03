@@ -374,10 +374,13 @@ else
 #!/command/with-contenv bash
 set -e
 sysctl -w net.ipv6.conf.all.disable_ipv6=1
-ip link set lo up
+command -v ip >/dev/null 2>&1 && ip link set lo up || true
 RUNSCRIPT_EOF
             chmod +x /tmp/disable-ipv6-run
-            pct push "$CT_ID" /tmp/disable-ipv6-run /etc/s6-overlay/s6-rc.d/disable-ipv6/run || { log_warn "Failed to push run script"; S6_OK=false; }
+            # --perms is required: pct push does not preserve the source file's execute
+            # bit, and a non-executable oneshot run script fails, which (since go2rtc
+            # depends on this service) blocks the whole service bundle from starting.
+            pct push "$CT_ID" /tmp/disable-ipv6-run /etc/s6-overlay/s6-rc.d/disable-ipv6/run --perms 0755 || { log_warn "Failed to push run script"; S6_OK=false; }
             rm -f /tmp/disable-ipv6-run
 
             pct exec "$CT_ID" -- bash -c "echo /etc/s6-overlay/s6-rc.d/disable-ipv6/run > /etc/s6-overlay/s6-rc.d/disable-ipv6/up" || { log_warn "Failed to create up file"; S6_OK=false; }
