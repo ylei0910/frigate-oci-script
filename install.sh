@@ -173,17 +173,27 @@ NEXT_CTID=$(pvesh get /cluster/nextid 2>/dev/null || echo "100")
 CLI_CT_ID="${CT_ID:-}"
 CLI_CT_HOSTNAME="${CT_HOSTNAME:-}"
 
+log_step "Fetching latest stable Frigate release tag from GitHub..."
+LATEST_FRIGATE_TAG=$(curl -s https://api.github.com/repos/blakeblackshear/frigate/releases/latest | python3 -c "import sys, json; print(json.load(sys.stdin).get('tag_name', '').lstrip('v'))" 2>/dev/null || echo "")
+if [ -n "$LATEST_FRIGATE_TAG" ]; then
+    log_success "Found latest stable version: $LATEST_FRIGATE_TAG"
+else
+    log_warn "Failed to fetch latest version from GitHub. Defaulting to 0.17.2"
+    LATEST_FRIGATE_TAG="0.17.2"
+fi
+DEFAULT_FRIGATE_IMAGE="ghcr.io/blakeblackshear/frigate:${LATEST_FRIGATE_TAG}"
+
 if [ "$NON_INTERACTIVE" = true ]; then
     log_info "Running in non-interactive/silent mode. Auto-applying all defaults."
     CT_ID="${CLI_CT_ID:-$NEXT_CTID}"
     CT_HOSTNAME="${CLI_CT_HOSTNAME:-frigate}"
     CT_CORES=4
     CT_RAM=4096
-    CT_SWAP=0
-    CT_DISK=10
+    CT_SWAP=512
+    CT_DISK=8
     CT_STORAGE="$DEFAULT_ROOTFS_STORAGE"
     TEMPLATE_STORAGE="$DEFAULT_TEMPLATE_STORAGE"
-    FRIGATE_IMAGE="ghcr.io/blakeblackshear/frigate:0.17.2"
+    FRIGATE_IMAGE="$DEFAULT_FRIGATE_IMAGE"
     HOST_MEDIA_PATH="${CLI_MEDIA_PATH:-/mnt/nas/CCTV/media}"
     NET_BRIDGE="vmbr0"
     NET_IP="dhcp"
@@ -209,12 +219,12 @@ else
     CT_RAM=${CT_RAM:-4096}
 
     # Swap
-    read -p "Enter Swap in MB (default: 0): " CT_SWAP
-    CT_SWAP=${CT_SWAP:-0}
+    read -p "Enter Swap in MB (default: 512): " CT_SWAP
+    CT_SWAP=${CT_SWAP:-512}
 
     # Disk Size
-    read -p "Enter Disk Size in GB (default: 10): " CT_DISK
-    CT_DISK=${CT_DISK:-10}
+    read -p "Enter Disk Size in GB (default: 8): " CT_DISK
+    CT_DISK=${CT_DISK:-8}
 
     # Rootfs storage
     echo "Available storage for Container Rootfs:"
@@ -229,8 +239,8 @@ else
     TEMPLATE_STORAGE=${TEMPLATE_STORAGE:-$DEFAULT_TEMPLATE_STORAGE}
 
     # Frigate Image
-    read -p "Enter Frigate Image Tag (default: ghcr.io/blakeblackshear/frigate:0.17.2): " FRIGATE_IMAGE
-    FRIGATE_IMAGE=${FRIGATE_IMAGE:-ghcr.io/blakeblackshear/frigate:0.17.2}
+    read -p "Enter Frigate Image Tag (default: $DEFAULT_FRIGATE_IMAGE): " FRIGATE_IMAGE
+    FRIGATE_IMAGE=${FRIGATE_IMAGE:-$DEFAULT_FRIGATE_IMAGE}
 
     # Host bind mount (media only - /config lives inside the container's own rootfs)
     read -p "Enter Host Media Path (default: /mnt/nas/CCTV/media): " HOST_MEDIA_PATH
