@@ -410,15 +410,25 @@ fi
 # Update Proxmox summary dashboard notes
 log_step "Updating Proxmox summary dashboard..."
 IP_ADDRESS=""
-# Wait up to 5 seconds for IP address allocation if container started successfully
-if [ "$DRY_RUN" = false ] && pct status "$CT_ID" | grep -q "running"; then
-    for i in {1..5}; do
-        IP_ADDRESS=$(pct exec "$CT_ID" -- hostname -I | awk '{print $1}' 2>/dev/null || echo "")
-        if [ -n "$IP_ADDRESS" ]; then
-            break
-        fi
+if [ "$DRY_RUN" = false ]; then
+    # If we just triggered a reboot, wait for the container to actually come
+    # back up (it may briefly report stopped/booting) before polling for an IP.
+    for i in {1..30}; do
+        pct status "$CT_ID" | grep -q "running" && break
         sleep 1
     done
+
+    if pct status "$CT_ID" | grep -q "running"; then
+        # Wait up to 30 seconds for IP address allocation (DHCP after reboot
+        # can take longer than a fresh container start).
+        for i in {1..30}; do
+            IP_ADDRESS=$(pct exec "$CT_ID" -- hostname -I | awk '{print $1}' 2>/dev/null || echo "")
+            if [ -n "$IP_ADDRESS" ]; then
+                break
+            fi
+            sleep 1
+        done
+    fi
 fi
 IP_ADDRESS=${IP_ADDRESS:-"<IP_ADDRESS>"}
 
@@ -485,9 +495,7 @@ ${CORAL_LINE}- Resources: ${CT_RAM}MB RAM / ${CT_CORES} CPU Cores
 - Media Storage: ${HOST_MEDIA_PATH}
 ${MOUNT_LINE}
 ---
-GitHub: [ylei0910/frigate-oci-script](https://github.com/ylei0910/frigate-oci-script)
-
-Support: [Buy me a coffee](https://ko-fi.com/saihgupr)")
+GitHub: [ylei0910/frigate-oci-script](https://github.com/ylei0910/frigate-oci-script)")
 
 if [ "$DRY_RUN" = true ]; then
     log_info "[DRY RUN] Would update dashboard notes for container $CT_ID to:"

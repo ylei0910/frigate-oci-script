@@ -155,6 +155,6 @@ go2rtc:
 
 If you encounter any issues or have feature requests, please open an [issue on GitHub](https://github.com/ylei0910/frigate-oci-script/issues).
 
-If you find it useful, consider giving it a star ⭐ or [making a donation](https://ko-fi.com/saihgupr) to support development.
+If you find it useful, consider giving it a star ⭐.
 
 
